@@ -4,15 +4,23 @@ import { db, exportBackup, restoreBackup, wipeAll } from '../lib/db';
 import { DEFAULT_MODEL } from '../lib/config';
 import type { Settings as S } from '../lib/types';
 import { Card } from '../components/ui';
+import BankCard from '../components/BankCard';
+import type { SyncStatus } from '../lib/psd2';
 
-export default function Settings({ settings, setSettings, onRunAi, aiBusy, notify }: {
-  settings: S; setSettings: (s: S) => void; onRunAi: () => void; aiBusy: boolean; notify: (m: string) => void;
+export interface BankProps {
+  status: SyncStatus | null; error: string | null; busy: boolean;
+  onConnect: () => void; onSync: () => void; onDisconnect: () => void;
+}
+
+export default function Settings({ settings, setSettings, onRunAi, aiBusy, notify, bank }: {
+  settings: S; setSettings: (s: S) => void; onRunAi: () => void; aiBusy: boolean; notify: (m: string) => void; bank: BankProps;
 }) {
   const imports = useLiveQuery(() => db.imports.orderBy('importedAt').reverse().toArray(), []) ?? [];
   const pending = useLiveQuery(() => db.transactions.filter(t => t.source === 'none').count(), []) ?? 0;
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
+      <BankCard {...bank} syncUrl={settings.syncUrl} setSyncUrl={u => setSettings({ ...settings, syncUrl: u })} />
       <Card title={<span className="flex items-center gap-2"><KeyRound className="h-4 w-4 text-slate-400" /> AI categorisation</span>}>
         <label className="flex items-center justify-between gap-4 text-sm">
           <span>Use Claude for merchants the app doesn't recognise</span>
@@ -38,7 +46,8 @@ export default function Settings({ settings, setSettings, onRunAi, aiBusy, notif
 
       <Card title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-slate-400" /> Privacy</span>}>
         <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
-          <li>• All transactions are stored in this browser only (IndexedDB). There is no server.</li>
+          <li>• All transactions are stored in this browser only (IndexedDB). With a bank connection, the sync helper on your computer also keeps the last ~90 days of raw bank data in server/data/.</li>
+          <li>• The bank connection goes through Enable Banking, a licensed PSD2 provider, which can see your transactions while passing them on. It is read-only.</li>
           <li>• Most transactions are categorised on your device by built-in rules and what you taught it.</li>
           <li>• Only <strong>unknown merchants</strong> go to Claude: one entry per merchant with its name, up to two example descriptions and a typical amount. That name can be a person you transfer money to. IBANs, card numbers and long reference numbers are removed first. Your balance, your account number and your own name are never sent.</li>
           <li>• Clearing your browser data deletes everything. Export a backup now and then.</li>

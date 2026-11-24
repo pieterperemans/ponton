@@ -67,8 +67,13 @@ export function monthsWithData(txs: Transaction[]): string[] {
   return [...new Set(txs.map(t => monthKey(t.date)))].sort();
 }
 
+// With a live bank connection, "no transactions today" still means the data is current up to today.
+let syncedThrough: string | undefined;
+export const setSyncedThrough = (isoDate: string | undefined) => { syncedThrough = isoDate; };
+
 export function dataThrough(txs: Transaction[]): string | undefined {
-  return txs.reduce<string | undefined>((m, t) => (!m || t.date > m ? t.date : m), undefined);
+  const last = txs.reduce<string | undefined>((m, t) => (!m || t.date > m ? t.date : m), undefined);
+  return syncedThrough && (!last || syncedThrough > last) ? syncedThrough : last;
 }
 
 /** Fraction of the month covered by imported data (1 for past months). */

@@ -1,0 +1,9 @@
+{
+  "applicationId": "paste-your-enable-banking-application-id",
+  "privateKeyPath": "./private.pem",
+  "aspsp": { "name": "KBC", "country": "BE" },
+  "psuType": "personal",
+  "port": 8787,
+  "redirectUrl": "http://localhost:8787/callback",
+  "appUrl": "http://localhost:5173"
+}

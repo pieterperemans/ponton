@@ -17,13 +17,16 @@ class PontonDB extends Dexie {
       budgets: 'category',
       imports: '++id, importedAt',
     });
+    this.version(2).stores({
+      transactions: 'id, date, merchantKey, category, needsReview, account, origin',
+    }).upgrade(tx => tx.table('transactions').toCollection().modify(t => { t.origin ??= 'csv'; }));
   }
 }
 
 export const db = new PontonDB();
 
 const SETTINGS_KEY = 'ponton.settings';
-const defaults: Settings = { apiKey: '', model: DEFAULT_MODEL, aiEnabled: true };
+const defaults: Settings = { apiKey: '', model: DEFAULT_MODEL, aiEnabled: true, syncUrl: 'http://localhost:8787' };
 
 export function loadSettings(): Settings {
   try {

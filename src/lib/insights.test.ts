@@ -8,7 +8,7 @@ import type { Transaction } from './types';
 const rows = parseKbcCsv(sampleKbcCsv(new Date(2026, 10, 24))).rows;
 const own = new Set(['BE68539007547034', 'BE71096123456769']);
 const txs: Transaction[] = rows.map(r => ({
-  ...r, id: rowId(r), importedAt: 0, ...categorise(r, new Map(), own),
+  ...r, id: rowId(r), importedAt: 0, origin: 'csv' as const, ...categorise(r, new Map(), own),
 }));
 
 describe('pipeline + insights on sample data', () => {

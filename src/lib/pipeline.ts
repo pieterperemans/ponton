@@ -2,6 +2,7 @@ import { db } from './db';
 import { decode, merchantKey, parseKbcCsv, rowId, type ParsedRow } from './kbc';
 import { matchRule } from './rules';
 import { UNCATEGORISED } from './categories';
+import { planMerge } from './merge';
 import type { MerchantSample } from './ai';
 import type { MerchantMemory, Settings, Transaction } from './types';
 
@@ -42,67 +43,62 @@ export interface ImportSummary {
   warnings: string[];
 }
 
+/** Shared by CSV import and PSD2 sync: de-duplicate, categorise, store. */
+export async function ingestRows(
+  rows: ParsedRow[],
+  origin: 'csv' | 'psd2',
+  idFor: (r: ParsedRow) => string,
+  syncedAccounts: Set<string> = new Set(),
+) {
+  const existing = await db.transactions.toArray();
+  const ownAccounts = new Set([...existing.map(t => t.account), ...rows.map(r => r.account), ...syncedAccounts].filter(Boolean));
+  const memory = new Map((await db.memory.toArray()).map(m => [m.merchantKey, m]));
+  const plan = planMerge(existing, rows.map(r => ({ id: idFor(r), row: r })), origin, syncedAccounts);
+  const now = Date.now();
+
+  const fresh: Transaction[] = plan.add.map(({ id, row: r, inherit }) => {
+    const auto = categorise(r, memory, ownAccounts);
+    const keep = inherit && inherit.source === 'manual'
+      ? { category: inherit.category, source: inherit.source, confidence: inherit.confidence, needsReview: false }
+      : {};
+    return {
+      id, origin,
+      account: r.account, date: r.date, amount: r.amount, currency: r.currency, balance: r.balance,
+      description: r.description, counterparty: r.counterparty, counterpartyAccount: r.counterpartyAccount,
+      message: r.message, pending: r.pending || undefined, importedAt: now,
+      ...auto, ...keep,
+    };
+  });
+
+  await db.transaction('rw', db.transactions, async () => {
+    if (plan.remove.length) await db.transactions.bulkDelete(plan.remove);
+    if (fresh.length) await db.transactions.bulkAdd(fresh);
+    // A newly seen own account can turn earlier "payments" into internal transfers.
+    await db.transactions
+      .filter(t => !!t.counterpartyAccount && ownAccounts.has(t.counterpartyAccount) && t.category !== 'internal' && t.source !== 'manual')
+      .modify({ category: 'internal', source: 'rule', confidence: 1, needsReview: false });
+  });
+
+  return {
+    added: fresh.length,
+    duplicates: plan.duplicates,
+    removed: plan.remove.length,
+    autoCategorised: fresh.filter(t => t.source !== 'none').length,
+    pendingAi: fresh.filter(t => t.source === 'none').length,
+  };
+}
+
 export async function importStatement(file: File): Promise<ImportSummary> {
   const text = decode(await file.arrayBuffer());
   const { rows, warnings } = parseKbcCsv(text);
   if (!rows.length) throw new Error('No transactions found in this file.');
-
-  const existingAccounts = (await db.transactions.orderBy('account').uniqueKeys()) as string[];
-  const ownAccounts = new Set([...existingAccounts, ...rows.map(r => r.account)].filter(Boolean));
-  const memory = new Map((await db.memory.toArray()).map(m => [m.merchantKey, m]));
-
-  const withIds = rows.map(r => ({ r, id: rowId(r) }));
-  const existing = new Set((await db.transactions.bulkGet(withIds.map(x => x.id))).filter(Boolean).map(t => t!.id));
-  const seen = new Set<string>();
-  const now = Date.now();
-  const fresh: Transaction[] = [];
-
-  for (const { r, id } of withIds) {
-    if (existing.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    fresh.push({
-      id,
-      account: r.account,
-      date: r.date,
-      amount: r.amount,
-      currency: r.currency,
-      balance: r.balance,
-      description: r.description,
-      counterparty: r.counterparty,
-      counterpartyAccount: r.counterpartyAccount,
-      message: r.message,
-      importedAt: now,
-      ...categorise(r, memory, ownAccounts),
-    });
-  }
-
-  await db.transactions.bulkAdd(fresh);
-
-  // A newly seen own account can turn earlier "payments" into internal transfers.
-  await db.transactions
-    .filter(t => !!t.counterpartyAccount && ownAccounts.has(t.counterpartyAccount) && t.category !== 'internal' && t.source !== 'manual')
-    .modify({ category: 'internal', source: 'rule', confidence: 1, needsReview: false });
-
-  const dates = rows.map(r => r.date).sort();
+  const r = await ingestRows(rows, 'csv', rowId);
+  const dates = rows.map(x => x.date).sort();
   await db.imports.add({
-    fileName: file.name,
-    importedAt: now,
-    rows: rows.length,
-    added: fresh.length,
-    duplicates: rows.length - fresh.length,
-    from: dates[0],
-    to: dates[dates.length - 1],
+    fileName: file.name, importedAt: Date.now(), rows: rows.length, added: r.added,
+    duplicates: r.duplicates, from: dates[0], to: dates[dates.length - 1],
   });
-
-  return {
-    fileName: file.name,
-    rows: rows.length,
-    added: fresh.length,
-    duplicates: rows.length - fresh.length,
-    autoCategorised: fresh.filter(t => t.source !== 'none').length,
-    pendingAi: fresh.filter(t => t.source === 'none').length,
-    warnings,
-  };
+  return { fileName: file.name, rows: rows.length, ...r, warnings };
 }
 
 /** Sends one entry per unknown merchant (not per transaction) to Claude, then learns the answer. */

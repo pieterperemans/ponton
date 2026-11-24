@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { FileUp, Sparkles } from 'lucide-react';
+import { FileUp, Link2, Sparkles } from 'lucide-react';
 
-export default function Dropzone({ onFiles, onSample, busy }: { onFiles: (f: File[]) => void; onSample: () => void; busy: boolean }) {
+export default function Dropzone({ onFiles, onSample, busy, onConnectBank, bankName }: {
+  onFiles: (f: File[]) => void; onSample: () => void; busy: boolean; onConnectBank?: () => void; bankName?: string;
+}) {
   const [over, setOver] = useState(false);
   return (
     <div className="mx-auto max-w-2xl py-10 sm:py-16">
@@ -23,6 +25,7 @@ export default function Dropzone({ onFiles, onSample, busy }: { onFiles: (f: Fil
       </label>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
+        {onConnectBank && <button className="btn-primary" onClick={onConnectBank} disabled={busy}><Link2 className="h-4 w-4" /> Connect {bankName ?? 'your bank'} directly</button>}
         <button className="btn-outline" onClick={onSample} disabled={busy}><Sparkles className="h-4 w-4" /> Try it with sample data</button>
       </div>
 

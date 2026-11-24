@@ -20,6 +20,8 @@ export interface Transaction {
   confidence: number;       // 0..1
   needsReview: boolean;
   importedAt: number;
+  origin: 'csv' | 'psd2';   // where the row came from; both can describe the same payment
+  pending?: boolean;        // PSD2 only: authorised but not yet booked (e.g. a fresh card payment)
 }
 
 export interface MerchantMemory {
@@ -50,4 +52,5 @@ export interface Settings {
   apiKey: string;
   model: string;
   aiEnabled: boolean;
+  syncUrl: string;          // local Ponton sync helper; empty = PSD2 off
 }

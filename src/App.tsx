@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { ChevronLeft, ChevronRight, FileUp, Loader2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileUp, Link2, Loader2, RefreshCw, X } from 'lucide-react';
 import { db, loadSettings, saveSettings } from './lib/db';
 import { importStatement, runAiCategorisation } from './lib/pipeline';
 import { monthLabel } from './lib/format';
-import { monthsWithData } from './lib/insights';
+import { monthsWithData, setSyncedThrough } from './lib/insights';
+import { disconnect, lastSync, startConnect, syncNow, syncStatus } from './lib/sync';
+import type { SyncStatus } from './lib/psd2';
+import { ago, daysLeft } from './components/BankCard';
 import { sampleKbcCsv } from './lib/sample';
 import type { Settings as S } from './lib/types';
 import Overview, { type Nav } from './views/Overview';
@@ -31,6 +34,9 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [bank, setBank] = useState<SyncStatus | null>(null);
+  const [bankError, setBankError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const setSettings = (s: S) => { setSettingsState(s); saveSettings(s); };
   const months = useMemo(() => monthsWithData(txs ?? []), [txs]);
@@ -50,6 +56,63 @@ export default function App() {
       setBusy(null);
     }
   }, [settings]);
+
+  const doSync = useCallback(async (refresh: boolean, quiet = false) => {
+    if (!settings.syncUrl) return;
+    setSyncing(true);
+    try {
+      const r = await syncNow(settings.syncUrl, refresh);
+      setBank(r.status);
+      setBankError(null);
+      if (!quiet || r.added) {
+        setToast(r.added
+          ? `Bank sync: ${r.added} new transaction${r.added === 1 ? '' : 's'}${r.pendingCount ? `, ${r.pendingCount} still pending` : ''}.`
+          : 'Bank sync: you are up to date.');
+      }
+      if (r.pendingAi && settings.aiEnabled && settings.apiKey) await runAi();
+    } catch (e) {
+      const msg = (e as Error).message;
+      setBankError(msg);
+      if (!quiet) setToast(msg);
+    } finally {
+      setSyncing(false);
+    }
+  }, [settings, runAi]);
+
+  // On open: check the helper, and refresh from the bank if the last sync is older than 30 minutes.
+  useEffect(() => {
+    if (!settings.syncUrl) { setBank(null); setSyncedThrough(undefined); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const st = await syncStatus(settings.syncUrl);
+        if (cancelled) return;
+        setBank(st);
+        setBankError(null);
+        if (!st.connected) { setSyncedThrough(undefined); return; }
+        setSyncedThrough(lastSync()?.slice(0, 10));
+        const params = new URLSearchParams(window.location.search);
+        const justConnected = params.has('synced');
+        if (justConnected) window.history.replaceState(null, '', window.location.pathname);
+        const stale = !lastSync() || Date.now() - Date.parse(lastSync()!) > 30 * 60_000;
+        if (justConnected || stale) await doSync(!justConnected, !justConnected);
+      } catch (e) {
+        if (!cancelled) { setBank(null); setBankError((e as Error).message); }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.syncUrl]);
+
+  const connectBank = async () => {
+    try { window.location.href = (await startConnect(settings.syncUrl)).url; }
+    catch (e) { setToast((e as Error).message); }
+  };
+
+  const disconnectBank = async () => {
+    if (!confirm('Disconnect the bank? Transactions already imported stay in Ponton.')) return;
+    try { setBank(await disconnect(settings.syncUrl)); setSyncedThrough(undefined); } catch (e) { setToast((e as Error).message); }
+  };
 
   const handleFiles = useCallback(async (files: File[]) => {
     const csvs = files.filter(f => /\.csv$/i.test(f.name) || f.type.includes('csv'));
@@ -111,6 +174,13 @@ export default function App() {
             </nav>
           )}
           {empty && <div className="flex-1" />}
+          {bank?.connected && (
+            <button onClick={() => doSync(true)} disabled={syncing} title="Sync with your bank"
+              className="btn-ghost hidden px-2 text-xs sm:inline-flex">
+              <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing…' : `Updated ${ago(bank.lastRefresh)}`}
+            </button>
+          )}
           {!empty && (
             <label className="btn-primary cursor-pointer px-3 sm:px-4">
               <FileUp className="h-4 w-4" /><span className="hidden sm:inline">Import</span>
@@ -122,7 +192,7 @@ export default function App() {
 
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         {empty ? (
-          <Dropzone onFiles={handleFiles} onSample={loadSample} busy={!!busy} />
+          <Dropzone onFiles={handleFiles} onSample={loadSample} busy={!!busy || syncing} onConnectBank={bank?.configured && !bank.connected ? connectBank : undefined} bankName={bank?.bank} />
         ) : (
           <>
             {tab !== 'settings' && current && (
@@ -132,10 +202,19 @@ export default function App() {
                 <button className="btn-ghost p-2" disabled={mIdx >= months.length - 1} onClick={() => setMonth(months[mIdx + 1])} aria-label="Next month"><ChevronRight className="h-5 w-5" /></button>
               </div>
             )}
+            {bank?.connected && daysLeft(bank.validUntil) <= 14 && (
+              <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+                <span className="flex-1">Your bank access expires in {Math.max(0, daysLeft(bank.validUntil))} days. One KBC login renews it.</span>
+                <button className="btn-primary px-3 py-1.5" onClick={connectBank}><Link2 className="h-4 w-4" /> Renew</button>
+              </div>
+            )}
             {tab === 'overview' && current && <Overview txs={txs} budgets={budgets} month={current} setMonth={setMonth} onNav={go} />}
             {tab === 'transactions' && current && <Transactions txs={txs} month={current} nav={nav} setNav={setNav} />}
             {tab === 'budgets' && current && <Budgets txs={txs} budgets={budgets} month={current} onNav={go} />}
-            {tab === 'settings' && <Settings settings={settings} setSettings={setSettings} onRunAi={() => runAi()} aiBusy={!!busy} notify={setToast} />}
+            {tab === 'settings' && (
+              <Settings settings={settings} setSettings={setSettings} onRunAi={() => runAi()} aiBusy={!!busy} notify={setToast}
+                bank={{ status: bank, error: bankError, busy: syncing, onConnect: connectBank, onSync: () => doSync(true), onDisconnect: disconnectBank }} />
+            )}
           </>
         )}
       </main>

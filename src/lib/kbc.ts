@@ -19,6 +19,8 @@ export interface ParsedRow {
   counterpartyAccount?: string;
   message?: string;
   statement?: string;
+  pending?: boolean;
+  externalId?: string;
 }
 
 export interface ParseResult {

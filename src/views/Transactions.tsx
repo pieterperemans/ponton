@@ -17,7 +17,9 @@ function Row({ t }: { t: Transaction }) {
     <li className="grid grid-cols-[3.5rem_1fr_auto] items-center gap-x-3 gap-y-1 py-3 sm:grid-cols-[4rem_1fr_12rem_7rem]">
       <span className="num text-xs text-slate-400">{shortDate(t.date)}</span>
       <div className="min-w-0">
-        <div className="truncate text-sm font-medium">{nice(t.counterparty)}</div>
+        <div className="flex items-center gap-2 truncate text-sm font-medium">{nice(t.counterparty)}
+          {t.pending && <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800">pending</span>}
+        </div>
         <div className="truncate text-xs text-slate-400" title={t.description}>{[txKind(t.description), t.message].filter(Boolean).join(' · ') || t.description}</div>
       </div>
       <span className={`num text-right text-sm font-semibold sm:order-last ${t.amount > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
