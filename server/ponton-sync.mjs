@@ -13,6 +13,7 @@
  *   add --background to refresh 4x/day while it runs (the PSD2 limit for unattended access)
  */
 import http from 'node:http';
+import https from 'node:https';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -164,7 +165,13 @@ function status() {
   };
 }
 
-const server = http.createServer(async (req, res) => {
+// Optional HTTPS (for when Enable Banking requires an https redirect URL). Use a locally trusted
+// certificate, e.g. from mkcert, so the browser accepts it without warnings.
+const tls = config.https?.certPath && config.https?.keyPath
+  ? { cert: fs.readFileSync(path.resolve(here, config.https.certPath)), key: fs.readFileSync(path.resolve(here, config.https.keyPath)) }
+  : null;
+const scheme = tls ? 'https' : 'http';
+const handler = async (req, res) => {
   const origin = req.headers.origin;
   const host = (req.headers.host ?? '').split(':')[0];
   // DNS-rebinding and cross-site guard: only localhost hosts, only Ponton origins.
@@ -180,7 +187,7 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+  const url = new URL(req.url ?? '/', `${scheme}://${req.headers.host}`);
   try {
     if (req.method === 'GET' && url.pathname === '/status') return send(res, 200, status(), origin);
 
@@ -224,10 +231,12 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, e.status === 401 ? 401 : 500, { error: e.message }, origin);
   }
-});
+};
+const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
 
 server.listen(config.port, '127.0.0.1', () => {
-  console.log(`Ponton sync helper on http://localhost:${config.port}${MOCK ? '  [MOCK BANK]' : ''}`);
+  console.log(`Ponton sync helper on ${scheme}://localhost:${config.port}${MOCK ? '  [MOCK BANK]' : ''}`);
+  if (config.redirectUrl.startsWith('https') !== !!tls) console.log(`Warning: redirectUrl is ${config.redirectUrl} but the helper runs on ${scheme}. These must match.`);
   if (!MOCK && !status().configured) console.log('Not configured yet: see server/README.md');
 });
 

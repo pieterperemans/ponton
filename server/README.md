@@ -26,7 +26,17 @@ After that, Ponton syncs automatically whenever you open it and the last sync is
 - **KBC credit cards are not available through PSD2.** Your current account and debit card payments are.
 - **History:** the first sync fetches the last 90 days. Keep using CSV import for older history. Overlapping CSV and bank data is de-duplicated (same account and amount, dates within 4 days).
 - **Pending payments** (e.g. a card payment from this morning) count towards your budgets straight away. They are replaced by the booked version on a later sync. If you change a pending payment's category by hand, the change carries over.
-- **Redirect URL:** if Enable Banking rejects `http://localhost`, register an HTTPS URL you control that forwards to `http://localhost:8787/callback`, and set `redirectUrl` in `config.json` to that HTTPS URL. *Not yet verified against their current rules.*
+- **Redirect URL with https:** if your Enable Banking app's redirect URL is `https://localhost:8787/callback`, run the helper over HTTPS with a locally trusted certificate (macOS, needs Homebrew):
+  ```bash
+  brew install mkcert
+  mkcert -install
+  cd server && mkcert localhost && cd ..
+  ```
+  Then add the following to `server/config.json` and set Ponton's Settings → Sync helper address to `https://localhost:8787`:
+  ```json
+  "redirectUrl": "https://localhost:8787/callback",
+  "https": { "certPath": "./localhost.pem", "keyPath": "./localhost-key.pem" }
+  ```
 - **Data at rest:** `server/data/state.json` holds the session id and the last ~90 days of raw transactions, readable only by your user (file mode 600). Delete the folder to forget everything.
 
 ## Unverified
