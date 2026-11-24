@@ -10,7 +10,8 @@
     "test": "vitest run",
     "sync": "node server/ponton-sync.mjs",
     "sync:mock": "node server/ponton-sync.mjs --mock",
-    "sync:background": "node server/ponton-sync.mjs --background"
+    "sync:background": "node server/ponton-sync.mjs --background",
+    "doctor": "node server/doctor.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.13.0",
